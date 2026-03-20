@@ -709,13 +709,12 @@ The assessment workspace is ready. Use your standard tools to work with files an
             return settings
         
         qwen_settings = create_qwen_settings()
-        
-        # Determine config locations
-        # Try workspace first, fallback to home directory
+
+        # Determine config location
+        # Qwen reads QWEN.md from workspace root, and .qwen/settings.json from workspace
         workspace_qwen_dir = Path(workspace_path) / ".qwen"
-        home_qwen_dir = Path.home() / ".qwen"
         
-        # Choose config directory (prefer workspace, fallback to home)
+        # Try to create config in workspace
         config_dir = None
         config_location = ""
         
@@ -727,12 +726,19 @@ The assessment workspace is ready. Use your standard tools to work with files an
             test_file.unlink()
             config_dir = workspace_qwen_dir
             config_location = "workspace"
-        except (PermissionError, OSError):
-            # Can't write to workspace, use home directory
-            home_qwen_dir.mkdir(parents=True, exist_ok=True)
-            config_dir = home_qwen_dir
-            config_location = "home"
-        
+        except (PermissionError, OSError) as e:
+            # Can't write to workspace - this is a critical error
+            # We don't fallback to ~/.qwen/ to avoid cross-assessment config pollution
+            if not quiet:
+                console.print("[red]✗ Cannot write to workspace configuration directory[/red]")
+                console.print(f"[dim]  Error: {e}[/dim]")
+                console.print("\n[yellow]Troubleshooting:[/yellow]")
+                console.print("  • Check workspace permissions:")
+                console.print(f"    [cyan]ls -la {workspace_path}[/cyan]")
+                console.print("  • Fix ownership:")
+                console.print(f"    [cyan]sudo chown -R $USER:$USER {workspace_path}[/cyan]\n")
+            sys.exit(1)
+
         if not quiet:
             console.print(f"[dim]✓ Qwen config: {config_location} directory[/dim]")
             console.print(f"[dim]  Path: {config_dir}[/dim]")
@@ -741,9 +747,13 @@ The assessment workspace is ready. Use your standard tools to work with files an
         settings_file = config_dir / "settings.json"
         settings_file.write_text(json.dumps(qwen_settings, indent=2))
 
-        # Write QWEN.md (system prompt)
-        qwen_md_file = config_dir / "QWEN.md"
+        # Write QWEN.md at workspace ROOT (not in .qwen/)
+        # Qwen Code reads QWEN.md from project root, like CLAUDE.md for Claude Code
+        qwen_md_file = Path(workspace_path) / "QWEN.md"
         qwen_md_file.write_text(preprompt_content)
+        
+        if not quiet and debug:
+            console.print(f"[dim]✓ System prompt: {qwen_md_file.name} (workspace root)[/dim]\n")
 
         # Qwen CLI command
         cli_args = ["qwen"]
